@@ -18,6 +18,8 @@ import (
 	"github.com/pmezard/licenses/assets"
 )
 
+const VendorPath = string(os.PathSeparator) + "vendor" + string(os.PathSeparator)
+
 type Template struct {
 	Title    string
 	Nickname string
@@ -381,6 +383,7 @@ func findLicense(info *PkgInfo) (string, error) {
 
 type License struct {
 	Package      string
+	Version      string
 	Score        float64
 	Template     *Template
 	Path         string
@@ -454,6 +457,27 @@ func listLicenses(gopath string, pkgs []string) ([]License, error) {
 			license.Template = m.Template
 			license.ExtraWords = m.ExtraWords
 			license.MissingWords = m.MissingWords
+		}
+		if strings.HasPrefix(info.Dir, gopath) || !strings.Contains(info.Dir, VendorPath) {
+			current, err := os.Getwd()
+			if err != nil {
+				return nil, err
+			}
+			err = os.Chdir(info.Dir)
+			if err != nil {
+				return nil, err
+			}
+			cmd := exec.Command("git", "rev-parse", "HEAD")
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				license.Version = "?"
+			} else {
+				license.Version = strings.TrimSpace(string(out))
+			}
+			err = os.Chdir(current)
+			if err != nil {
+				return nil, err
+			}
 		}
 		licenses = append(licenses, license)
 	}
@@ -539,8 +563,8 @@ func groupLicenses(licenses []License) ([]License, error) {
 }
 
 type Row struct {
-	Package, License, Match, Words string
-	Score                          float64
+	Package, Version, License, Match, Words string
+	Score                                   float64
 }
 
 type Rows []Row
@@ -591,6 +615,7 @@ func generateReport(report string, licenses []License, confidence float64, words
 			license = strings.Replace(l.Err, "\n", " ", -1)
 		}
 		table[i].Package = l.Package
+		table[i].Version = l.Version
 		table[i].License = license
 		table[i].Match = fmt.Sprintf("%2d%%", int(100*l.Score+.5))
 		table[i].Words = diff
@@ -598,10 +623,13 @@ func generateReport(report string, licenses []License, confidence float64, words
 	}
 	sort.Sort(table)
 
-	maxPackage, maxLicense, maxMatch, maxWords := 0, 0, 0, 0
+	maxPackage, maxVersion, maxLicense, maxMatch, maxWords := 0, 0, 0, 0, 0
 	for _, row := range table {
 		if width := len(row.Package); width > maxPackage {
 			maxPackage = width
+		}
+		if width := len(row.Version); width > maxVersion {
+			maxVersion = width
 		}
 		if width := len(row.License); width > maxLicense {
 			maxLicense = width
@@ -636,6 +664,7 @@ func generateReport(report string, licenses []License, confidence float64, words
 	}
 	out.WriteString("|")
 	rowWidthPackage := writeHeading("Package", maxPackage)
+	rowWidthVersion := writeHeading("Version", maxVersion)
 	rowWidthLicense := writeHeading("License", maxLicense)
 	rowWidthMatch := writeHeading("Match", maxMatch)
 	var rowWidthWords int
@@ -653,6 +682,7 @@ func generateReport(report string, licenses []License, confidence float64, words
 	}
 	out.WriteString("|")
 	writeSep(rowWidthPackage)
+	writeSep(rowWidthVersion)
 	writeSep(rowWidthLicense)
 	writeSep(rowWidthMatch)
 	if words {
@@ -672,6 +702,7 @@ func generateReport(report string, licenses []License, confidence float64, words
 	for _, row := range table {
 		out.WriteString("|")
 		writeRow(row.Package, rowWidthPackage)
+		writeRow(row.Version, rowWidthVersion)
 		writeRow(row.License, rowWidthLicense)
 		writeRow(row.Match, rowWidthMatch)
 		if words {
