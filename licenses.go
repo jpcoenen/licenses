@@ -422,6 +422,11 @@ func listLicenses(gopath string, pkgs []string) ([]License, error) {
 	// subpackages like bleve.
 	matched := map[string]MatchResult{}
 
+	godeps, err := LoadGodeps()
+	if err != nil {
+		return nil, err
+	}
+
 	licenses := []License{}
 	for _, info := range infos {
 		if info.Error != nil {
@@ -438,8 +443,16 @@ func listLicenses(gopath string, pkgs []string) ([]License, error) {
 		if err != nil {
 			return nil, err
 		}
+
+		parts, after := strings.Split(info.ImportPath, "/"), 0
+		for i, part := range parts {
+			if part == "vendor" {
+				after = i + 1
+				break
+			}
+		}
 		license := License{
-			Package: info.ImportPath,
+			Package: strings.Join(parts[after:], "/"),
 			Path:    path,
 		}
 		if path != "" {
@@ -458,7 +471,19 @@ func listLicenses(gopath string, pkgs []string) ([]License, error) {
 			license.ExtraWords = m.ExtraWords
 			license.MissingWords = m.MissingWords
 		}
-		if strings.HasPrefix(info.Dir, gopath) || !strings.Contains(info.Dir, VendorPath) {
+
+		license.Version = "?"
+		found := false
+		if godeps != nil {
+			for _, dep := range godeps.Deps {
+				if dep.ImportPath == license.Package {
+					license.Version = dep.Rev
+					found = true
+					break
+				}
+			}
+		}
+		if strings.HasPrefix(info.Dir, gopath) && !found {
 			current, err := os.Getwd()
 			if err != nil {
 				return nil, err
@@ -469,9 +494,7 @@ func listLicenses(gopath string, pkgs []string) ([]License, error) {
 			}
 			cmd := exec.Command("git", "rev-parse", "HEAD")
 			out, err := cmd.CombinedOutput()
-			if err != nil {
-				license.Version = "?"
-			} else {
+			if err == nil {
 				license.Version = strings.TrimSpace(string(out))
 			}
 			err = os.Chdir(current)
